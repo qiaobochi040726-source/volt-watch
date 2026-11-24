@@ -66,6 +66,15 @@ def test_a_prefix_runs_every_matching_group(monkeypatch):
     assert "packages.outdated" not in checks
 
 
+def test_firewall_group_runs_the_default_policy_check(monkeypatch):
+    _healthy(monkeypatch)
+    monkeypatch.setattr(auditor.collector, "ufw_default_incoming", lambda: "allow")
+
+    checks = [f.check for f in auditor.audit(only="firewall")]
+
+    assert checks == ["firewall.default_allow"]
+
+
 def test_an_unknown_prefix_exits_non_zero_with_a_message(monkeypatch, capsys):
     _healthy(monkeypatch)
 
