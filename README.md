@@ -100,6 +100,7 @@ still works exactly as before.
 | `config.drift_unknown` | warning | The `/etc` scan could not be completed, so replaced config files are unknown |
 | `config.world_writable` | critical / warning | A file or directory under `/etc` is world-writable; critical under `ssh/`, `sudoers.d/`, `pam.d/`, `systemd/system/` or `cron.d*` |
 | `config.world_writable_unknown` | warning | The `/etc` scan could not be completed, so world-writable paths are unknown |
+| `firewall.default_allow` | critical | The firewall default incoming policy is `allow`, so services are reachable unless explicitly blocked |
 | `packages.outdated` | info / warning / critical | 1–20, 21–100, over 100 pending package updates |
 | `power.restore_disabled` | critical | Chipset is set to stay off when power returns |
 | `power.register_unreadable` | warning | `setpci` reported `0xff` — an access failure, not a value |
@@ -116,6 +117,7 @@ unread firewall looks exactly like a firewall with no SSH rules.
 | Check | Works unprivileged | Needs root | Notes |
 |---|---|---|---|
 | `sshd.*` | partial | **yes** | reads `ufw status verbose`, a root-only wrapper on Arch/Omarchy |
+| `firewall.*` | partial | **yes** | reads the same `ufw status verbose` default-policy line |
 | `security.*` | partial | **yes** | reads `/etc/shadow`; an unprivileged run reports `security.shadow_unreadable` instead of guessing |
 | `config.*` | partial | **yes** | walks `/etc` for `*.pacnew`/`*.pacsave` and world-writable paths; an unreadable subtree makes the scan unknown |
 | `auditor.degraded` | yes | no | summarizes readers that could not run, without another privileged read |

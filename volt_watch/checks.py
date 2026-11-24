@@ -757,3 +757,36 @@ def world_writable_etc_check(paths: list | None) -> list:
             evidence={"paths": shown, "total": len(paths)},
         )
     ]
+
+
+def firewall_default_check(default_incoming: str | None) -> list:
+    """Report an incoming firewall policy that allows traffic by default.
+
+    ``None`` means the policy could not be read; ``sshd.firewall_unreadable``
+    already owns that unknown state, so this check stays silent. ``allow`` is
+    critical. ``deny`` and ``reject`` are safe defaults. Anything else readable
+    is reported as a warning because the auditor cannot classify it.
+    """
+    if default_incoming in (None, "deny", "reject"):
+        return []
+    if default_incoming == "allow":
+        return [
+            Finding(
+                check="firewall.default_allow",
+                severity=Severity.CRITICAL,
+                message="The firewall default incoming policy is allow, so services are reachable by default",
+                remedy="Set `ufw default deny incoming`, then allow only the ports you need.",
+                evidence={"default_incoming": default_incoming},
+            )
+        ]
+    return [
+        Finding(
+            check="firewall.default_allow",
+            severity=Severity.WARNING,
+            message=(
+                f"The firewall default incoming policy is {default_incoming!r}, which this auditor cannot classify as safe"
+            ),
+            remedy="Set `ufw default deny incoming`, then allow only the ports you need.",
+            evidence={"default_incoming": default_incoming},
+        )
+    ]
