@@ -90,6 +90,7 @@ versioned too.
 | `disk.space_low` | warning / critical | The root filesystem is running out of space (90%) or inodes (95%), and critical at 95% / 99% |
 | `systemd.failed` | warning / critical | A systemd unit's last run failed; critical when the unit is one whose loss makes the host unreachable |
 | `kernel.pending_reboot` | warning | A kernel is installed that is newer than the running one |
+| `packages.orphaned` | info / warning | Installed packages nothing requires; a kernel or boot-path package is a warning |
 | `packages.outdated` | info / warning / critical | 1–20, 21–100, over 100 pending package updates |
 | `power.restore_disabled` | critical | Chipset is set to stay off when power returns |
 | `power.register_unreadable` | warning | `setpci` reported `0xff` — an access failure, not a value |
@@ -107,6 +108,11 @@ unread firewall looks exactly like a firewall with no SSH rules.
 |---|---|---|---|
 | `sshd.*` | partial | **yes** | reads `ufw status verbose`, a root-only wrapper on Arch/Omarchy |
 | `security.*` | partial | **yes** | reads `/etc/shadow`; an unprivileged run reports `security.shadow_unreadable` instead of guessing |
+| `auditor.degraded` | yes | no | summarizes readers that could not run, without another privileged read |
+| `time.unsynchronised` | yes | no | reads synchronization state with `timedatectl show` and `systemctl is-active` |
+| `packages.outdated` | yes | no | reads `checkupdates`; unavailable or failed commands are reported as unknown |
+| `packages.orphaned` | yes | no | queries the package database with `pacman -Qdt` |
+| `power.register_missing` | yes | no | reports an absent or unreadable register rather than a register value |
 | `disk.space_low` | yes | no | `statvfs` on the root filesystem, standard library only |
 | `systemd.failed` | partial | **yes** | `systemctl --failed` lists system units for everyone, but a root-only unit can be hidden from a user manager |
 | `kernel.pending_reboot` | yes | no | `uname -r` and `pacman -Q`; no kernel package on a non-Arch host is not a finding |
@@ -173,6 +179,24 @@ first.
 ```bash
 python -m pytest tests/ -q
 ```
+
+### Keeping documentation current
+
+`tests/test_documentation.py` statically inspects `Finding(check=...)`
+constructors in `volt_watch/checks.py` and `volt_watch/auditor.py`, without
+running an audit or a host reader. It compares the Checks table in both
+directions, and expands Privileges table wildcards against the same names.
+Every privileges pattern must match a real check, and every check must be
+covered. `auditor.degraded` is included even though it is added outside
+`auditor.CHECKS`. CLI-only baseline metadata (`auditor.no_baseline`) is
+documented under Usage rather than treated as a host check.
+
+Keep test counts out of this README and the separate profile README. Use
+"the suite is the specification" and link to the current CI run instead
+of copying a number that goes stale. The profile is maintained separately;
+this repository does not fetch or test its contents. When updating that
+profile, remove any manual test or finding count rather than maintaining
+a second inventory of checks.
 
 ## License
 
