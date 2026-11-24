@@ -25,7 +25,7 @@ def test_the_payload_carries_a_version(capsys):
 
     out = json.loads(capsys.readouterr().out)
 
-    assert out["version"] == 1
+    assert out["version"] == 2
     assert isinstance(out["version"], int)
 
 
@@ -64,7 +64,7 @@ def test_output_writes_the_same_wrapper(tmp_path, capsys):
     written = json.loads(out_file.read_text(encoding="utf-8"))
 
     assert written == printed
-    assert written["version"] == 1
+    assert written["version"] == 2
 
 
 def test_the_plain_output_is_unchanged(capsys):
