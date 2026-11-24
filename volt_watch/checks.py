@@ -651,3 +651,53 @@ def empty_password_accounts_check(accounts: list | None) -> list:
             evidence={"accounts": names},
         )
     ]
+
+
+def config_drift_check(drift: dict | None) -> list:
+    """Report config files pacman left behind for an administrator to review.
+
+    ``drift`` comes from :func:`collector.config_drift`. ``None`` means the
+    scan could not complete; that is a finding about the audit's coverage, not
+    a clean tree. The evidence is capped so a mass replacement cannot flood
+    the report; ``counts`` always carries the real totals.
+    """
+    if drift is None:
+        return [
+            Finding(
+                check="config.drift_unknown",
+                severity=Severity.WARNING,
+                message="The /etc scan could not be completed, so replaced config files are unknown",
+                remedy="Run the auditor as root, or grant read access to /etc.",
+                evidence={"path": "/etc"},
+            )
+        ]
+
+    pacnew = drift.get("pacnew", [])
+    pacsave = drift.get("pacsave", [])
+    total = len(pacnew) + len(pacsave)
+    if not total:
+        return []
+
+    shown = [*pacnew[:10], *pacsave[:10]]
+    suffix = "" if total <= len(shown) else f" (and {total - len(shown)} more)"
+    return [
+        Finding(
+            check="config.drift",
+            severity=Severity.WARNING,
+            message=(
+                f"{total} replaced config file(s) need review: "
+                + ", ".join(shown)
+                + suffix
+            ),
+            remedy=(
+                "Review each with `pacdiff` and its owning package with "
+                "`pacman -Qo`, then keep or remove it. Do not delete blindly."
+            ),
+            evidence={
+                "pacnew": pacnew[:20],
+                "pacsave": pacsave[:20],
+                "counts": {"pacnew": len(pacnew), "pacsave": len(pacsave)},
+                "truncated": drift.get("truncated", False),
+            },
+        )
+    ]

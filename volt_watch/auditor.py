@@ -4,6 +4,7 @@ from . import collector
 from .checks import (
     auditor_degraded_check,
     clock_check,
+    config_drift_check,
     disk_space_check,
     empty_password_accounts_check,
     failed_units_check,
@@ -55,6 +56,7 @@ CHECKS: dict[str, list] = {
         lambda: pending_updates_check(collector.pending_update_count()),
         lambda: orphaned_packages_check(collector.orphaned_packages()),
     ],
+    "config": [lambda: config_drift_check(collector.config_drift())],
     "power": [_power],
 }
 
