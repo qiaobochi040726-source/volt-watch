@@ -16,6 +16,7 @@ from .checks import (
     sshd_config_check,
     tailscale_exposure_check,
     tailscale_check,
+    world_writable_etc_check,
 )
 
 
@@ -56,7 +57,10 @@ CHECKS: dict[str, list] = {
         lambda: pending_updates_check(collector.pending_update_count()),
         lambda: orphaned_packages_check(collector.orphaned_packages()),
     ],
-    "config": [lambda: config_drift_check(collector.config_drift())],
+    "config": [
+        lambda: config_drift_check(collector.config_drift()),
+        lambda: world_writable_etc_check(collector.world_writable_etc()),
+    ],
     "power": [_power],
 }
 
