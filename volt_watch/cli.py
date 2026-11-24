@@ -142,13 +142,21 @@ def main(argv=None, findings=None) -> int:
         "counts": _counts(findings),
     }
 
+    if args.output:
+        try:
+            Path(args.output).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError as exc:
+            message = f"could not write {args.output!r}: {exc}"
+            if args.json:
+                print(json.dumps({**payload, "error": message}, indent=2))
+            else:
+                print(f"volt-watch: error: {message}", file=sys.stderr)
+            return 2
+
     if args.json:
         print(json.dumps(payload, indent=2))
     elif not args.quiet:
         _report(findings)
-
-    if args.output:
-        Path(args.output).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     if baseline is not None:
         # Compared against the last report, only a new or worsened finding is a

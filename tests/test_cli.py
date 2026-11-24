@@ -1,6 +1,9 @@
 """Tests for the command line interface."""
 
 import json
+from pathlib import Path
+
+import pytest
 
 from volt_watch import cli
 
@@ -60,3 +63,32 @@ def test_quiet_suppresses_plain_output(capsys):
     cli.main(["--quiet"], findings=findings)
 
     assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("mode", [[], ["--quiet"], ["--json"]])
+def test_unwritable_output_is_an_auditor_error(tmp_path, monkeypatch, capsys, mode):
+    target = tmp_path / "baseline.json"
+    findings = [
+        {"check": "test.warning", "severity": "warning", "message": "m",
+         "remedy": "", "evidence": {}},
+    ]
+
+    def fail_to_write(path, *args, **kwargs):
+        assert path == target
+        raise PermissionError("permission denied")
+
+    monkeypatch.setattr(Path, "write_text", fail_to_write)
+
+    assert cli.main([*mode, "--output", str(target)], findings=findings) == 2
+
+    captured = capsys.readouterr()
+    message = f"could not write {str(target)!r}: permission denied"
+    if "--json" in mode:
+        payload = json.loads(captured.out)
+        assert payload["error"] == message
+        assert payload["findings"] == findings
+        assert payload["counts"]["warning"] == 1
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert captured.err == f"volt-watch: error: {message}\n"
