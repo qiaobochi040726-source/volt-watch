@@ -66,10 +66,15 @@ message text. A missing baseline adds an `auditor.no_baseline` `info` finding.
 `--check power` runs every `power.*` check and nothing else. An unknown prefix
 exits 2 and lists the available ones.
 
-The JSON payload carries a `version` (currently `1`) and the `host` name, so a
-consumer can tell which release produced it. `findings` and `counts` are
-unchanged, and `--output` writes the same wrapper, so a `--since` baseline is
-versioned too.
+The JSON payload is versioned (currently `2`) and carries the `host` name, the
+UTC `generated_at` timestamp and a `coverage` summary (`readers` attempted and
+`degraded` reader names). `findings` and `counts` keep their shape, and
+`--output` writes the same wrapper, so a `--since` baseline is versioned too.
+
+A v1 baseline (which has only `version`, `host`, `findings` and `counts`) stays
+readable: `--since` compares findings only, so new provenance fields cannot
+change the exit code against an older report. A v1 report copied as a baseline
+still works exactly as before.
 
 ## Checks
 

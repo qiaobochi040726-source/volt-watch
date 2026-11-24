@@ -9,9 +9,10 @@ import argparse
 import json
 import platform
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .auditor import audit, check_prefixes
+from .auditor import audit, audit_with_coverage, check_prefixes  # noqa: F401 - audit is a public seam
 
 # The exit code a finding severity contributes to.
 _EXIT_BY_SEVERITY = {"critical": 1, "warning": 1, "info": 0}
@@ -20,7 +21,40 @@ _EXIT_BY_SEVERITY = {"critical": 1, "warning": 1, "info": 0}
 _SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
 
 # Bump when the report shape changes in a way a consumer must know about.
-REPORT_VERSION = 1
+# v2 adds generated_at and coverage; --since keeps reading v1 findings only.
+REPORT_VERSION = 2
+
+
+def _generated_at() -> str:
+    """UTC ISO-8601 with an explicit Z, so a report carries its run time."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _coverage_from_findings(findings) -> dict:
+    """Coverage for the injected-findings seam, where no readers actually ran.
+
+    A degraded finding still carries its reader map; mirror it so a test that
+    injects one sees the same coverage a real audit would produce.
+    """
+    degraded = []
+    for finding in findings:
+        if finding.get("check") != "auditor.degraded":
+            continue
+        readers = (finding.get("evidence") or {}).get("readers") or {}
+        if isinstance(readers, dict):
+            degraded = sorted(str(name) for name in readers)
+    return {"readers": 0, "degraded": degraded}
+
+
+def _payload(findings, coverage, generated_at=None) -> dict:
+    return {
+        "version": REPORT_VERSION,
+        "generated_at": generated_at if generated_at is not None else _generated_at(),
+        "host": platform.node(),
+        "coverage": coverage,
+        "findings": findings,
+        "counts": _counts(findings),
+    }
 
 
 def _parse_args(argv):
@@ -143,13 +177,17 @@ def main(argv=None, findings=None) -> int:
         available = ", ".join(check_prefixes())
         message = f"unknown check prefix {args.check!r}; available: {available}"
         if args.json:
-            print(json.dumps({"findings": [], "counts": {"total": 0, "critical": 0, "warning": 0, "info": 0}, "error": message}, indent=2))
+            payload = _payload([], {"readers": 0, "degraded": []})
+            print(json.dumps({**payload, "error": message}, indent=2))
         elif not args.quiet:
             print(f"volt-watch: error: {message}", file=sys.stderr)
         return 2
 
     if findings is None:
-        findings = [f.as_dict() for f in audit(only=args.check)]
+        audited, coverage = audit_with_coverage(only=args.check)
+        findings = [f.as_dict() for f in audited]
+    else:
+        coverage = _coverage_from_findings(findings)
 
     baseline, dropped = _read_baseline(args.since) if args.since else (None, 0)
     if args.since and baseline is None:
@@ -177,12 +215,7 @@ def main(argv=None, findings=None) -> int:
             }
         ]
 
-    payload = {
-        "version": REPORT_VERSION,
-        "host": platform.node(),
-        "findings": findings,
-        "counts": _counts(findings),
-    }
+    payload = _payload(findings, coverage)
 
     if args.output:
         try:

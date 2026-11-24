@@ -66,6 +66,34 @@ def check_prefixes() -> list:
     return list(CHECKS)
 
 
+def audit_with_coverage(only: str | None = None) -> tuple[list, dict]:
+    """Run the checks and return ``(findings, coverage)``.
+
+    ``coverage`` describes how complete the run was: ``readers`` counts the
+    check callables attempted (fewer with ``--check``) and ``degraded`` lists
+    the reader names that failed, the same names carried by the
+    ``auditor.degraded`` finding's evidence.
+
+    ``audit`` stays a plain list of findings for existing callers.
+    """
+    findings = []
+    readers = 0
+
+    for prefix, checks in CHECKS.items():
+        if only is not None and not prefix.startswith(only):
+            continue
+        for check in checks:
+            readers += 1
+            findings.extend(check())
+
+    errors = collector.collector_errors()
+    findings.extend(auditor_degraded_check(errors))
+    severity_order = {"critical": 0, "warning": 1, "info": 2}
+    findings.sort(key=lambda f: severity_order[f.severity.value])
+    coverage = {"readers": readers, "degraded": sorted(errors)}
+    return findings, coverage
+
+
 def audit(only: str | None = None) -> list:
     """Inspect the host and return every finding, worst first.
 
@@ -78,16 +106,6 @@ def audit(only: str | None = None) -> list:
     check is skipped rather than reported as broken. A reader that could not run
     at all is reported by ``auditor.degraded`` at the end.
     """
-    findings = []
+    findings, _coverage = audit_with_coverage(only)
 
-    for prefix, checks in CHECKS.items():
-        if only is not None and not prefix.startswith(only):
-            continue
-        for check in checks:
-            findings.extend(check())
-
-    findings.extend(auditor_degraded_check(collector.collector_errors()))
-
-    severity_order = {"critical": 0, "warning": 1, "info": 2}
-    findings.sort(key=lambda f: severity_order[f.severity.value])
     return findings
