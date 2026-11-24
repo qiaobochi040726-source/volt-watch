@@ -20,6 +20,7 @@ _READER_DEFAULTS = {
     "orphaned_packages": list,
     "empty_password_accounts": list,
     "config_drift": lambda: {"pacnew": [], "pacsave": [], "truncated": False},
+    "world_writable_etc": list,
 }
 
 
