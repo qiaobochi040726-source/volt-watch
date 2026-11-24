@@ -65,6 +65,26 @@ def _finding_key(finding):
     return (finding["check"], json.dumps(finding.get("evidence"), sort_keys=True))
 
 
+def _valid_finding(finding) -> bool:
+    """Whether a baseline entry has everything the comparison reads.
+
+    The report is machine-written but hand-editable, so one broken entry must
+    not take the whole run down. Anything the comparison would choke on is
+    rejected here and dropped from the baseline.
+    """
+    if not isinstance(finding, dict):
+        return False
+    if not isinstance(finding.get("check"), str):
+        return False
+    if finding.get("severity") not in _SEVERITY_RANK:
+        return False
+    try:
+        json.dumps(finding.get("evidence"), sort_keys=True)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def _regressions(current, previous):
     """Return the findings that are new or worse than the previous report."""
     before = {_finding_key(f): f["severity"] for f in previous}
@@ -79,13 +99,21 @@ def _regressions(current, previous):
 
 
 def _read_baseline(path):
-    """Read a previous report, or None when it is missing or unreadable."""
+    """Read a previous report, or None when it is missing or unreadable.
+
+    Only well-formed findings come back; the number dropped is returned so the
+    caller can say the comparison was partial. A file that is not a report at
+    all is treated as no baseline, as before.
+    """
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return None, 0
     findings = data.get("findings") if isinstance(data, dict) else None
-    return findings if isinstance(findings, list) else None
+    if not isinstance(findings, list):
+        return None, 0
+    good = [f for f in findings if _valid_finding(f)]
+    return good, len(findings) - len(good)
 
 
 def _counts(findings):
@@ -123,7 +151,7 @@ def main(argv=None, findings=None) -> int:
     if findings is None:
         findings = [f.as_dict() for f in audit(only=args.check)]
 
-    baseline = _read_baseline(args.since) if args.since else None
+    baseline, dropped = _read_baseline(args.since) if args.since else (None, 0)
     if args.since and baseline is None:
         findings = findings + [
             {
@@ -132,6 +160,20 @@ def main(argv=None, findings=None) -> int:
                 "message": f"No readable baseline at {args.since}; nothing to compare against",
                 "remedy": "Run once with --output to create the baseline.",
                 "evidence": {"since": args.since},
+            }
+        ]
+
+    if dropped:
+        findings = findings + [
+            {
+                "check": "auditor.baseline_invalid",
+                "severity": "warning",
+                "message": (
+                    f"{dropped} baseline finding(s) could not be read; "
+                    "this comparison is incomplete"
+                ),
+                "remedy": f"Inspect {args.since} or delete it, then run once with --output.",
+                "evidence": {"since": args.since, "dropped": dropped},
             }
         ]
 
@@ -160,8 +202,11 @@ def main(argv=None, findings=None) -> int:
 
     if baseline is not None:
         # Compared against the last report, only a new or worsened finding is a
-        # regression; one that cleared up is the good outcome.
-        return 1 if _regressions(findings, baseline) else 0
+        # regression; one that cleared up is the good outcome. The invalid
+        # baseline warning describes the tool, not the host, so it must not
+        # decide the exit code.
+        host = [f for f in findings if f["check"] != "auditor.baseline_invalid"]
+        return 1 if _regressions(host, baseline) else 0
 
     worst = max((_EXIT_BY_SEVERITY[f["severity"]] for f in findings), default=0)
     return worst

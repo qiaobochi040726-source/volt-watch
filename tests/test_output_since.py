@@ -130,3 +130,64 @@ def test_quiet_suppresses_output_but_not_the_exit_code(tmp_path, capsys):
 
     assert code == 1
     assert capsys.readouterr().out == ""
+
+
+def test_a_bad_baseline_entry_is_skipped_but_the_good_one_still_compares(tmp_path, capsys):
+    good = _finding()
+    bad = {"severity": "critical", "message": "no check", "evidence": {"port": 22}}
+    previous = _write(tmp_path / "prev.json", [good, bad])
+
+    code = cli.main(["--json", "--since", str(previous)], findings=[_finding()])
+
+    out = json.loads(capsys.readouterr().out)
+    invalid = [f for f in out["findings"] if f["check"] == "auditor.baseline_invalid"]
+    assert code == 0
+    assert invalid
+    assert invalid[0]["evidence"]["dropped"] == 1
+
+
+def test_a_bad_entry_colliding_with_a_current_finding_does_not_crash(tmp_path, capsys):
+    """The broken entry shares the current finding's identity but has no severity.
+
+    It cannot be trusted, so it is dropped and the finding counts as new — the
+    comparison must not blow up on the missing key.
+    """
+    current = _finding()
+    bad = {"check": current["check"], "message": "broken", "evidence": current["evidence"]}
+    previous = _write(tmp_path / "prev.json", [bad])
+
+    code = cli.main(["--json", "--since", str(previous)], findings=[current])
+
+    out = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert any(f["check"] == "auditor.baseline_invalid" for f in out["findings"])
+
+
+def test_an_entry_with_an_unknown_severity_is_dropped(tmp_path, capsys):
+    previous = _write(tmp_path / "prev.json", [_finding(severity="urgent")])
+
+    code = cli.main(["--json", "--since", str(previous)], findings=[])
+
+    out = json.loads(capsys.readouterr().out)
+    invalid = [f for f in out["findings"] if f["check"] == "auditor.baseline_invalid"]
+    assert code == 0
+    assert invalid
+    assert invalid[0]["evidence"]["dropped"] == 1
+
+
+def test_the_validator_rejects_evidence_json_cannot_encode():
+    """A file read from disk is always JSON-typed, but the helper still guards it."""
+    assert cli._valid_finding(_finding(evidence={"port": object()})) is False
+
+
+def test_an_empty_file_or_a_report_without_findings_uses_no_baseline(tmp_path, capsys):
+    empty = tmp_path / "empty.json"
+    empty.write_text("", encoding="utf-8")
+    no_key = tmp_path / "nokey.json"
+    no_key.write_text(json.dumps({"counts": {}}), encoding="utf-8")
+
+    for path in (empty, no_key):
+        code = cli.main(["--json", "--since", str(path)], findings=[])
+        out = json.loads(capsys.readouterr().out)
+        assert code == 0
+        assert any(f["check"] == "auditor.no_baseline" for f in out["findings"])
