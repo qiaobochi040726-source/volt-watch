@@ -701,3 +701,59 @@ def config_drift_check(drift: dict | None) -> list:
             },
         )
     ]
+
+
+# Directories whose write bit turns into root: SSH host keys and config,
+# sudo rules, PAM, systemd units and cron drop-ins. A file named *like* one of
+# these (`sshd_config` at the top level) is not under it and stays a warning.
+_CRITICAL_DIRS = {"ssh", "sudoers.d", "pam.d"}
+
+
+def _critical_world_writable(path: str) -> bool:
+    parts = path.replace("\\", "/").split("/")
+    first = parts[0]
+    if first in _CRITICAL_DIRS or first.startswith("cron.d"):
+        return True
+    return first == "systemd" and len(parts) > 2 and parts[1] == "system"
+
+
+# Evidence cap: a hostile mass-change must not flood the report.
+MAX_WORLD_WRITABLE_ENTRIES = 20
+
+
+def world_writable_etc_check(paths: list | None) -> list:
+    """Report world-writable files and directories under /etc.
+
+    ``None`` means the scan could not complete, which is an unknown state, not
+    a clean tree. The evidence is capped so a mass change cannot flood a report.
+    """
+    if paths is None:
+        return [
+            Finding(
+                check="config.world_writable_unknown",
+                severity=Severity.WARNING,
+                message="The /etc scan could not be completed, so world-writable paths are unknown",
+                remedy="Run the auditor as root, or grant read access to /etc.",
+                evidence={"path": "/etc"},
+            )
+        ]
+    if not paths:
+        return []
+
+    shown = paths[:MAX_WORLD_WRITABLE_ENTRIES]
+    suffix = (
+        ""
+        if len(paths) <= len(shown)
+        else f" (and {len(paths) - len(shown)} more)"
+    )
+    names = ", ".join(item["path"] for item in shown)
+    critical = any(_critical_world_writable(item["path"]) for item in paths)
+    return [
+        Finding(
+            check="config.world_writable",
+            severity=Severity.CRITICAL if critical else Severity.WARNING,
+            message=f"{len(paths)} world-writable path(s) under /etc: {names}{suffix}",
+            remedy="Remove the write bit for others (`chmod o-w PATH`) and investigate who can write there.",
+            evidence={"paths": shown, "total": len(paths)},
+        )
+    ]

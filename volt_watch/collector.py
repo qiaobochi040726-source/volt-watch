@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import re
+import stat
 import subprocess
 from pathlib import Path
 
@@ -693,3 +694,44 @@ def config_drift(root: str = "/etc") -> dict | None:
         "pacsave": sorted(found["pacsave"]),
         "truncated": truncated,
     }
+
+
+# Bound the /etc mode walk: a stray mount or symlinked tree must not turn the
+# audit into a filesystem crawl. S_IWOTH is tested directly on lstat modes.
+MAX_WORLD_WRITABLE_DEPTH = 4
+
+
+def world_writable_etc(root: str = "/etc", max_depth: int = MAX_WORLD_WRITABLE_DEPTH) -> list | None:
+    """Return world-writable paths under ``root``, or None if it cannot be read.
+
+    Files and directories are both reported, with paths relative to ``root``
+    and each mode as an ``0o...`` string. Symlinks are never followed or
+    reported as themselves. A readable tree with nothing to report yields [].
+    """
+
+    if not os.path.isdir(root):
+        return None
+
+    found = []
+
+    def walk(directory, depth):
+        if depth > max_depth:
+            return
+        for entry in os.scandir(directory):
+            if entry.is_symlink():
+                continue
+            mode = entry.stat(follow_symlinks=False).st_mode
+            if mode & stat.S_IWOTH:
+                found.append({
+                    "path": os.path.relpath(entry.path, root),
+                    "mode": oct(stat.S_IMODE(mode)),
+                })
+            if entry.is_dir(follow_symlinks=False):
+                walk(entry.path, depth + 1)
+
+    try:
+        walk(root, 0)
+    except OSError:
+        return None
+    found.sort(key=lambda item: item["path"])
+    return found
