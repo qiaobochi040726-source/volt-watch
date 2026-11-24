@@ -200,7 +200,7 @@ def ufw_default_incoming() -> str | None:
             # splitting on the first ")" — which lands inside the clause when
             # both are present.
             match = re.search(r"(\w+)\s*\(incoming\)", line)
-            return match.group(1) if match and match.group(1) in ("allow", "deny") else None
+            return match.group(1) if match else None
     return None
 
 

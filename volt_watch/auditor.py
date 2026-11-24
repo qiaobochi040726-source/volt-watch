@@ -8,6 +8,7 @@ from .checks import (
     disk_space_check,
     empty_password_accounts_check,
     failed_units_check,
+    firewall_default_check,
     kernel_reboot_check,
     orphaned_packages_check,
     pending_updates_check,
@@ -45,6 +46,10 @@ CHECKS: dict[str, list] = {
     "sshd": [
         _ssh_exposure,
         lambda: sshd_config_check(collector.sshd_config()),
+    ],
+    "firewall": [
+        lambda: firewall_default_check(collector.ufw_default_incoming()),
+        _ssh_exposure,
     ],
     "security": [
         lambda: empty_password_accounts_check(collector.empty_password_accounts()),
