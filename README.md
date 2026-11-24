@@ -91,6 +91,8 @@ versioned too.
 | `systemd.failed` | warning / critical | A systemd unit's last run failed; critical when the unit is one whose loss makes the host unreachable |
 | `kernel.pending_reboot` | warning | A kernel is installed that is newer than the running one |
 | `packages.orphaned` | info / warning | Installed packages nothing requires; a kernel or boot-path package is a warning |
+| `config.drift` | warning | A config file replaced by pacman (`.pacnew`/`.pacsave`) awaits review |
+| `config.drift_unknown` | warning | The `/etc` scan could not be completed, so replaced config files are unknown |
 | `packages.outdated` | info / warning / critical | 1–20, 21–100, over 100 pending package updates |
 | `power.restore_disabled` | critical | Chipset is set to stay off when power returns |
 | `power.register_unreadable` | warning | `setpci` reported `0xff` — an access failure, not a value |
@@ -108,6 +110,7 @@ unread firewall looks exactly like a firewall with no SSH rules.
 |---|---|---|---|
 | `sshd.*` | partial | **yes** | reads `ufw status verbose`, a root-only wrapper on Arch/Omarchy |
 | `security.*` | partial | **yes** | reads `/etc/shadow`; an unprivileged run reports `security.shadow_unreadable` instead of guessing |
+| `config.*` | partial | **yes** | walks `/etc` for `*.pacnew`/`*.pacsave`; an unreadable subtree makes the scan unknown |
 | `auditor.degraded` | yes | no | summarizes readers that could not run, without another privileged read |
 | `time.unsynchronised` | yes | no | reads synchronization state with `timedatectl show` and `systemctl is-active` |
 | `packages.outdated` | yes | no | reads `checkupdates`; unavailable or failed commands are reported as unknown |

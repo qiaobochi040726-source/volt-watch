@@ -626,3 +626,70 @@ def empty_password_accounts(path: str = "/etc/shadow") -> list | None:
         if name and password == "":
             accounts.append({"name": name})
     return accounts
+
+
+# Bounds for the config-drift walk. `/etc` is shallow in practice; the depth
+# keeps a stray mount point or symlinked tree from turning the audit into a
+# filesystem crawl, and the entry cap bounds what a mass replacement can put
+# into one report.
+MAX_DRIFT_DEPTH = 4
+MAX_DRIFT_ENTRIES = 200
+
+
+def config_drift(root: str = "/etc") -> dict | None:
+    """Return replaced config files under ``root``, or None if unreadable.
+
+    Pacman leaves a ``.pacnew`` when it installed a new config over yours and
+    a ``.pacsave`` when the package stopped installing a config it used to own.
+    Both mean an administrator has a merge to review; neither changes the host
+    by itself.
+
+    The answer is ``{"pacnew": [...], "pacsave": [...], "truncated": bool}``
+    with paths relative to ``root``. A readable tree with nothing to report
+    gives two empty lists; a scan that could not complete — the root or any
+    subdirectory unreadable — gives ``None``, so a partial answer is never
+    mistaken for a clean one.
+    """
+    if not os.path.isdir(root):
+        return None
+
+    found = {"pacnew": [], "pacsave": []}
+    truncated = False
+
+    def walk(directory, depth):
+        nonlocal truncated
+        if truncated or depth > MAX_DRIFT_DEPTH:
+            return
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            raise
+
+        for entry in entries:
+            if len(found["pacnew"]) + len(found["pacsave"]) >= MAX_DRIFT_ENTRIES:
+                truncated = True
+                return
+            if entry.is_symlink():
+                continue
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    walk(entry.path, depth + 1)
+                elif entry.is_file(follow_symlinks=False):
+                    relative = os.path.relpath(entry.path, root)
+                    if entry.name.endswith(".pacnew"):
+                        found["pacnew"].append(relative)
+                    elif entry.name.endswith(".pacsave"):
+                        found["pacsave"].append(relative)
+            except OSError:
+                raise
+
+    try:
+        walk(root, 0)
+    except OSError:
+        return None
+
+    return {
+        "pacnew": sorted(found["pacnew"]),
+        "pacsave": sorted(found["pacsave"]),
+        "truncated": truncated,
+    }

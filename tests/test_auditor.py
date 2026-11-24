@@ -19,6 +19,7 @@ _READER_DEFAULTS = {
     "kernel_versions": lambda: {"running": "7.2.15-1-omarchy", "installed": ["7.2.15-1"]},
     "orphaned_packages": list,
     "empty_password_accounts": list,
+    "config_drift": lambda: {"pacnew": [], "pacsave": [], "truncated": False},
 }
 
 
