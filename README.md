@@ -104,6 +104,9 @@ still works exactly as before.
 | `security.sensitive_path_unknown` | warning | A sensitive path exists but could not be stat/read, so its permissions are unknown |
 | `firewall.disabled` | critical | UFW is installed but inactive, so host firewall rules are not filtering incoming connections |
 | `firewall.default_allow` | critical / warning | The firewall default incoming policy is `allow`, or another policy the auditor cannot classify as safe |
+| `network.listener_exposed` | critical | A wildcard-bound port has a firewall allow on every interface from a non-private source |
+| `network.listener_unrestricted` | warning / info | A wildcard-bound port is not mentioned by any firewall rule; warning when the default allows, info when it denies |
+| `network.firewall_unreadable` | warning | The firewall or listening socket state could not be read, so listener exposure is unknown |
 | `packages.outdated` | info / warning / critical | 1–20, 21–100, over 100 pending package updates |
 | `power.restore_disabled` | critical | Chipset is set to stay off when power returns |
 | `power.register_unreadable` | warning | `setpci` reported `0xff` — an access failure, not a value |
@@ -121,6 +124,7 @@ unread firewall looks exactly like a firewall with no SSH rules.
 |---|---|---|---|
 | `sshd.*` | partial | **yes** | reads `ufw status verbose`, a root-only wrapper on Arch/Omarchy |
 | `firewall.*` | partial | **yes** | reads the same `ufw status verbose` default-policy line |
+| `network.*` | partial | **yes** | reads `ss -tulpnH` (process column needs root) or `/proc/net/tcp*`, plus the same `ufw status verbose` output |
 | `security.*` | partial | **yes** | reads `/etc/shadow`; an unprivileged run reports `security.shadow_unreadable` instead of guessing |
 | `config.*` | partial | **yes** | walks `/etc` for `*.pacnew`/`*.pacsave` and world-writable paths; an unreadable subtree makes the scan unknown |
 | `auditor.degraded` | yes | no | summarizes readers that could not run, without another privileged read |

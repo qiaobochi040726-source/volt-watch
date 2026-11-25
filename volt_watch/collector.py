@@ -7,6 +7,7 @@ Mac-specific register does not exist.
 """
 
 import glob
+import ipaddress
 import json
 import os
 import re
@@ -531,6 +532,98 @@ def failed_units() -> list | None:
             }
         )
     return units
+
+
+def parse_ss_listeners(text: str) -> list:
+    """Parse ``ss -tulpnH`` output into one record per listening TCP socket.
+
+    ``-H`` suppresses the header and the columns are State, Recv-Q, Send-Q,
+    Local:Port, Peer:Port, Process. Only ``LISTEN`` rows are kept. The process
+    column is optional: without root it is empty, which is not an error. UDP
+    listeners are not parsed here; they are left for a later check.
+    """
+    listeners = []
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or fields[0] != "LISTEN":
+            continue
+        address, _, port = fields[3].rpartition(":")
+        if not address or not port:
+            continue
+        listeners.append(
+            {
+                "address": address.strip("[]"),
+                "port": port,
+                "process": " ".join(fields[5:]) if len(fields) > 5 else "",
+                "socket": "",
+            }
+        )
+    return listeners
+
+
+def _proc_address(hex_address: str) -> str:
+    """Turn a /proc/net/tcp* hex address into its normal textual form.
+
+    Each 32-bit word is stored little-endian; an IPv6 address is four of those
+    words, so the bytes are reversed per word and then joined with colons.
+    """
+    if len(hex_address) == 8:
+        raw = bytes.fromhex(hex_address)
+        return ".".join(str(part) for part in raw[::-1])
+
+    words = [hex_address[i:i + 8] for i in range(0, 32, 8)]
+    packed = "".join(bytes.fromhex(word)[::-1].hex() for word in words)
+    return str(ipaddress.ip_address(":".join(packed[i:i + 4] for i in range(0, 32, 4))))
+
+
+def _listening_ports_proc() -> list | None:
+    """Read listeners from /proc/net/tcp and /proc/net/tcp6, or None."""
+    listeners = []
+    readable = False
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        readable = True
+        for line in text.splitlines()[1:]:
+            fields = line.split()
+            if len(fields) < 4 or fields[3] != "0A":
+                continue
+            addr_hex, _, port_hex = fields[1].partition(":")
+            try:
+                port = str(int(port_hex, 16))
+                address = _proc_address(addr_hex)
+            except ValueError:
+                continue
+            listeners.append(
+                {
+                    "address": address,
+                    "port": port,
+                    "process": "",
+                    "socket": fields[9] if len(fields) > 9 else "",
+                }
+            )
+    if not readable:
+        _record_error("listening_ports", "ss and /proc/net/tcp both unavailable")
+        return None
+    return listeners
+
+
+def listening_ports() -> list | None:
+    """Return one record per listening TCP socket, or None if unreadable.
+
+    Tries ``ss -tulpnH`` first; an unprivileged run still reports the socket and
+    leaves the process column empty. When ``ss`` is not installed, fall back to
+    ``/proc/net/tcp`` and ``/proc/net/tcp6``. UDP listeners are not covered yet.
+    """
+    try:
+        done = _run(["ss", "-tulpnH"])
+    except (OSError, subprocess.SubprocessError):
+        return _listening_ports_proc()
+    if done.returncode != 0:
+        return _listening_ports_proc()
+    return parse_ss_listeners(done.stdout)
 
 
 # Packages that start with "linux" but are not kernels: firmware blobs, headers

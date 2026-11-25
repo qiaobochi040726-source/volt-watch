@@ -15,6 +15,10 @@ from .severity import Severity
 # Backend states that mean the node is not usable on the tailnet.
 _BAD_BACKEND_STATES = {"NeedsLogin", "Stopped", "NoState", "Starting"}
 
+# Carrier-grade NAT. A listener inside this range is not on the public internet,
+# so it is skipped the same way a loopback listener is.
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
 
 def tailscale_check(status: dict) -> list:
     """Report problems with this node's Tailscale membership.
@@ -810,6 +814,141 @@ def firewall_disabled_check(active: bool | None) -> list:
             evidence={"active": False},
         )
     ]
+
+
+def listener_exposure_check(listeners: list | None, rules: list | None, default_incoming: str | None) -> list:
+    """Report wildcard-bound listeners that the firewall leaves reachable.
+
+    ``listeners`` comes from :func:`collector.listening_ports`. A wildcard bind
+    on ``0.0.0.0`` or ``::`` is only safe when the firewall restricts its port.
+    Loopback and carrier-grade NAT binds are skipped: they are not reachable
+    from another host by this address.
+
+    ``rules`` and ``default_incoming`` are the same parsed firewall state the
+    SSH check uses. ``None`` for any input means the answer is unknown, which is
+    reported rather than guessed.
+
+    One finding per port. A broad allow wins over a scoped one, which wins over
+    the port not being mentioned at all.
+    """
+    if listeners is None or rules is None or default_incoming is None:
+        return [
+            Finding(
+                check="network.firewall_unreadable",
+                severity=Severity.WARNING,
+                message="The firewall or listening socket state could not be read, so listener exposure is unknown",
+                remedy=(
+                    "Run as root, or allow `ufw status verbose` and `ss -tulpnH` "
+                    "through polkit. See the privileges table in the README."
+                ),
+                evidence={
+                    "listeners": listeners,
+                    "rules": rules,
+                    "default_incoming": default_incoming,
+                },
+            )
+        ]
+
+    findings = []
+    seen = set()
+
+    for listener in listeners:
+        address = (listener.get("address") or "").strip()
+        if address == "*":
+            address = "0.0.0.0"
+        try:
+            addr = ipaddress.ip_address(address.strip("[]"))
+        except ValueError:
+            continue
+        if addr.is_loopback or addr in _CGNAT:
+            continue
+        if not addr.is_unspecified:
+            continue
+
+        port = str(listener.get("port", ""))
+        if not port or port in seen:
+            continue
+        seen.add(port)
+
+        port_rules = [
+            r for r in rules
+            if str(r.get("port", "")).split("/", 1)[0] == port
+        ]
+        broad_allows = [
+            r for r in port_rules
+            if r.get("action") == "ALLOW"
+            and not r.get("interface")
+            and not _is_private_source(r.get("source", ""))
+        ]
+
+        evidence = {
+            "address": listener.get("address", ""),
+            "port": port,
+            "process": listener.get("process", ""),
+        }
+
+        if broad_allows:
+            evidence["rule"] = broad_allows[0]
+            findings.append(
+                Finding(
+                    check="network.listener_exposed",
+                    severity=Severity.CRITICAL,
+                    message=(
+                        f"Port {port} is listening on {listener.get('address', '?')} "
+                        "and the firewall allows it from any source on every interface"
+                    ),
+                    remedy=(
+                        f"Change the allow rule for {port} to accept traffic only "
+                        "on tailscale0 (and a private source), or bind the service "
+                        "to localhost."
+                    ),
+                    evidence=evidence,
+                )
+            )
+            continue
+
+        if any(r.get("action") == "ALLOW" for r in port_rules):
+            # The allow is scoped to an interface or a private source, which is
+            # the shape this auditor wants.
+            continue
+
+        if not port_rules:
+            evidence["rule"] = None
+            evidence["default_incoming"] = default_incoming
+            if default_incoming == "allow":
+                findings.append(
+                    Finding(
+                        check="network.listener_unrestricted",
+                        severity=Severity.WARNING,
+                        message=(
+                            f"Port {port} is listening on {listener.get('address', '?')} "
+                            "and no firewall rule mentions it, while the default incoming policy allows traffic"
+                        ),
+                        remedy=(
+                            f"Add an explicit rule for {port} on tailscale0 and deny "
+                            "it elsewhere, or bind the service to localhost."
+                        ),
+                        evidence=evidence,
+                    )
+                )
+            else:
+                findings.append(
+                    Finding(
+                        check="network.listener_unrestricted",
+                        severity=Severity.INFO,
+                        message=(
+                            f"Port {port} is listening on {listener.get('address', '?')} "
+                            "and no firewall rule mentions it; the default deny policy is the only thing blocking it"
+                        ),
+                        remedy=(
+                            f"Bind the service to localhost, or add an explicit rule "
+                            f"for {port}, so its exposure does not depend on the default policy."
+                        ),
+                        evidence=evidence,
+                    )
+                )
+
+    return findings
 
 
 def _mode_bits(mode: str | None) -> int | None:
